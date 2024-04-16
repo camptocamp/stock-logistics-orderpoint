@@ -11,8 +11,8 @@
     "license": "AGPL-3",
     "application": False,
     "installable": True,
-    "depends": ["sale_stock", "stock_orderpoint_manual_procurement"],
+    "depends": ["base_partition", "product_route_mto", "stock"],
     "data": [
-        "data/stock_data.xml",
+        "views/stock_warehouse_views.xml",
     ],
 }
