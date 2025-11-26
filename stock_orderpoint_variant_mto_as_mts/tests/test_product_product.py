@@ -3,10 +3,12 @@
 # Copyright 2025 Michael Tietz (MT Software) <mtietz@mt-software.de>
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl)
 
+from odoo.tests import tagged
 
 from odoo.addons.base.tests.common import BaseCommon
 
 
+@tagged("post_install", "-at_install")
 class TestStockOrderpointMtoAsMts(BaseCommon):
     @classmethod
     def setUpClass(cls):
