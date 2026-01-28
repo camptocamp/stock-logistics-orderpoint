@@ -1,0 +1,24 @@
+# Copyright 2026 Camptocamp SA (https://www.camptocamp.com).
+# License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
+
+{
+    "name": "Stock Orderpoint Safety Stock",
+    "summary": "Automatically compute the safety stock for orderpoints",
+    "version": "19.0.1.0.0",
+    "author": "Camptocamp, Odoo Community Association (OCA)",
+    "maintainers": ["ivantodorovich"],
+    "website": "https://github.com/OCA/stock-logistics-orderpoint",
+    "license": "AGPL-3",
+    "category": "Inventory",
+    "depends": ["stock"],
+    "external_dependencies": {
+        "python": ["scipy"],
+    },
+    "data": [
+        "security/ir.model.access.csv",
+        "data/stock_cycle_service_level.xml",
+        "views/stock_cycle_service_level.xml",
+        "views/stock_warehouse_orderpoint.xml",
+        "views/res_config_settings.xml",
+    ],
+}

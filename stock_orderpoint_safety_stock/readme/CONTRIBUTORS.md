@@ -1,0 +1,2 @@
+- Ivan Todorovich \<<ivan.todorovich@camptocamp.com>\>
+- Gaëtan Vaujour \<<gaetan.vaujour@camptocamp.com>\>
