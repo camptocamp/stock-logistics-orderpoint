@@ -5,6 +5,8 @@ import datetime
 import math
 from collections import defaultdict
 from datetime import timedelta
+from statistics import fmean, stdev
+from typing import Any
 
 from odoo import api, fields, models
 from odoo.fields import Domain
@@ -48,7 +50,6 @@ class StockWarehouseOrderpoint(models.Model):
     demand_history_days = fields.Integer(
         string="Demand History Days",
         related="company_id.safety_stock_history_days",
-        store=True,  # Used in SQL query
     )
     # demand_history_exclude_weekends = fields.Boolean(
     #     string="Exclude Weekends from Demand History",
@@ -58,30 +59,34 @@ class StockWarehouseOrderpoint(models.Model):
     demand_avg_qty = fields.Float(
         string="Average Daily Demand",
         # TODO: help
+        digits="Product Unit of Measure",
     )
     demand_std_dev = fields.Float(
         string="Standard Deviation of Daily Demand",
         # TODO: help
+        digits="Product Unit of Measure",
     )
-    demand_lead_time_std_dev = fields.Float(
+    demand_lt_std_dev = fields.Float(
         string="Standard Deviation of Daily Demand over Lead Time",
         # TODO: help
-        compute="_compute_demand_lead_time_std_dev",
+        compute="_compute_demand_lt_std_dev",
+        digits="Product Unit of Measure",
     )
-    demand_analysis_date = fields.Datetime(
-        # string="Demand Analysis Date",
+    safety_stock = fields.Float(
+        compute="_compute_safety_stock",
+        digits="Product Unit of Measure",
         # TODO: help
     )
 
-    def _get_product_moves_history_domains(
+    def _get_product_demand_history_domains(
         self, warehouse: StockWarehouse, products: ProductProduct, days: int
     ) -> tuple[Domain, Domain]:
         """Returns the incoming and outgoing moves domains"""
         moves_domain = Domain(
             [
                 ("product_id", "in", products.ids),
-                ("date", ">=", f"today -{days}d +1d"),
-                ("date", "<", "today -1d"),
+                ("date", ">=", f"today -{days}d"),
+                ("date", "<", "today"),
                 ("state", "=", "done"),
                 ("product_qty", ">", 0),
             ]
@@ -101,14 +106,14 @@ class StockWarehouseOrderpoint(models.Model):
         return (moves_domain + moves_in_domain), (moves_domain + moves_out_domain)
 
     @api.model
-    def _get_product_moves_history_series(
+    def _get_product_demand_history_series(
         self,
         warehouse: StockWarehouse,
         products: ProductProduct,
         days: int,
     ) -> dict[ProductProduct, dict[datetime.date, float]]:
         """Get the history demand series for the products."""
-        moves_in_domain, moves_out_domain = self._get_product_moves_history_domains(
+        moves_in_domain, moves_out_domain = self._get_product_demand_history_domains(
             warehouse, products, days
         )
         moves_in_groups = self.env["stock.move"]._read_group(
@@ -121,58 +126,65 @@ class StockWarehouseOrderpoint(models.Model):
             groupby=["product_id", "date:day"],
             aggregates=["product_qty:sum"],
         )
-        # Initialize a zero-filled series
-        fill_from = datetime.date.today() - timedelta(days=days)
-        zero_filled_serie = dict.fromkeys(
-            (fill_from + timedelta(days=i) for i in range(days)), 0.0
-        )
         # Group by product and consolidate in/out moves
         # Quantities are now signed: positive for outgoing, negative for incoming
-        consumptions_by_product = defaultdict(lambda: zero_filled_serie.copy())
+        consumptions_by_product = defaultdict(lambda: defaultdict(float))
         for product, date, consumption in moves_in_groups:
             consumptions_by_product[product][date.date()] -= consumption
         for product, date, consumption in moves_out_groups:
             consumptions_by_product[product][date.date()] += consumption
         return consumptions_by_product
 
-    def _get_product_consumption_serie_stats(
-        self, filled_serie: dict[datetime.date, float]
-    ) -> dict[str, float]:
-        """Get the stats of the product consumption series"""
-        # Lazy load numpy to keep memory-efficient when not needed
-        import numpy as np
+    def _get_product_demand_history_serie_stats(
+        self,
+        serie: dict[datetime.date, float],
+        fill_from: datetime.date,
+        fill_to: datetime.date,
+    ) -> dict[str, Any]:
+        """Get the stats of the product demand history series
 
-        values = np.array(list(filled_serie.values()), dtype=float)
+        :param serie: The series of demand values.
+        :param fill_from: The date from which to zero-fill the series.
+        :param fill_to: The date to which to zero-fill the series.
+        :return: A dictionary with the stats of the series.
+        """
+        # Initialize a zero-filled series
+        filled_serie: list[float] = [
+            serie.get(fill_from + timedelta(days=i), 0.0)
+            for i in range((fill_to - fill_from).days)
+        ]
         return {
-            "_raw": values,
-            "demand_avg_qty": values.mean(values),
-            "demand_std_dev": values.std(values),
+            "_filled": filled_serie,
+            "demand_avg_qty": fmean(filled_serie),
+            "demand_std_dev": stdev(filled_serie),
         }
 
     def _recompute_daily_demand(self):
         """Recompute the Average Daily Demand and its Standard Deviation."""
-        to_recompute = self.filtered(lambda rec: rec.safety_stock_method != "manual")
-        if not to_recompute:
+        # Clear existing values
+        self.demand_avg_qty = 0.0
+        self.demand_std_dev = 0.0
+
+        # Process only orderpoints not using an automatic safety stock method
+        self = self.filtered(lambda rec: rec.safety_stock_method != "manual")
+        if not self:
             return
 
-        # Clear existing values
-        to_recompute.demand_avg_qty = 0.0
-        to_recompute.demand_std_dev = 0.0
-        to_recompute.demand_analysis_date = fields.Datetime.now()
-
         # Group by warehouse and demand history days to batch read groups of stock moves
-        grouped = to_recompute.grouped(
-            lambda rec: (rec.warehouse_id, rec.demand_history_days)
-        )
+        grouped = self.grouped(lambda rec: (rec.warehouse_id, rec.demand_history_days))
         for (warehouse, days), orderpoints in grouped.items():
             products = orderpoints.product_id
-            product_consumptions = self._get_product_moves_history_series(
+            product_consumptions = self._get_product_demand_history_series(
                 warehouse, products, days
             )
             # Compute the average and standard deviation of the series
+            today = datetime.date.today()
+            fill_from = today - timedelta(days=days)
             product_consumption_stats = {
-                product: self._get_product_consumption_serie_stats(
-                    product_consumptions[product]
+                product: self._get_product_demand_history_serie_stats(
+                    serie=product_consumptions[product],
+                    fill_from=fill_from,
+                    fill_to=today,
                 )
                 for product in product_consumptions
             }
@@ -183,13 +195,32 @@ class StockWarehouseOrderpoint(models.Model):
                     vals = {k: v for k, v in stats.items() if not k.startswith("_")}
                     orderpoint.write(vals)
 
+    def _apply_safety_stock(self):
+        for rec in self.filtered(lambda rec: rec.safety_stock_method != "manual"):
+            rec.product_min_qty = rec.safety_stock
+            rec.product_max_qty = rec.product_min_qty + (
+                rec.demand_avg_qty * rec.lead_days
+            )
+
     def action_recompute_history_demand(self):
-        self._recompute_daily_demand()
+        to_recompute = self.filtered(lambda rec: rec.safety_stock_method != "manual")
+        if not to_recompute:
+            return
+        to_recompute._recompute_daily_demand()
+        to_recompute._apply_safety_stock()
         return True
 
     @api.depends("demand_std_dev", "lead_days")
-    def _compute_demand_lead_time_std_dev(self):
+    def _compute_demand_lt_std_dev(self):
         for record in self:
-            record.demand_lead_time_std_dev = record.demand_std_dev * math.sqrt(
+            record.demand_lt_std_dev = record.demand_std_dev * math.sqrt(
                 record.lead_days
+            )
+
+    @api.depends("safety_stock_method", "demand_lt_std_dev", "z_score", "growth_factor")
+    def _compute_safety_stock(self):
+        self.safety_stock = 0.0
+        for rec in self.filtered(lambda rec: rec.safety_stock_method == "csl"):
+            rec.safety_stock = rec.product_id.uom_id.round(
+                rec.demand_lt_std_dev * rec.z_score * (1.0 + rec.growth_factor)
             )

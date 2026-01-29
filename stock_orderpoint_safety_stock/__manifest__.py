@@ -12,7 +12,7 @@
     "category": "Inventory",
     "depends": ["stock"],
     "external_dependencies": {
-        "python": ["scipy"],
+        "python": ["pyerf"],
     },
     "data": [
         "security/ir.model.access.csv",

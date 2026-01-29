@@ -1,7 +1,26 @@
 # Copyright 2026 Camptocamp SA (https://www.camptocamp.com).
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl).
 
+import math
+
+from pyerf import erfinv
+
 from odoo import api, fields, models
+
+
+def norm_ppf(p: float) -> float:
+    """Percent point function (inverse CDF) of the standard normal distribution.
+
+    This method is equal to the `norm.ppf` function from the `scipy.stats` library,
+    except it requires a lighter dependency: `pyerf`.
+
+    :param p: The probability.
+    :return: The z-score.
+    :raises ValueError: If the probability is not between 0 and 1.
+    """
+    if not 0.0 < p < 1.0:
+        raise ValueError("The probability must be between 0 and 1")
+    return math.sqrt(2.0) * erfinv(2.0 * p - 1.0)
 
 
 class StockCycleServiceLevel(models.Model):
@@ -56,11 +75,8 @@ class StockCycleServiceLevel(models.Model):
 
     @api.depends("csl")
     def _compute_z_score(self):
-        # Lazy import to keep memory-efficient when not needed
-        from scipy.stats import norm
-
         for record in self:
-            record.z_score = norm.ppf(record.csl) if 0.0 < record.csl < 1.0 else 0.0
+            record.z_score = norm_ppf(record.csl) if 0.0 < record.csl < 1.0 else 0.0
 
     def _compute_orderpoint_count(self):
         groups = self.env["stock.warehouse.orderpoint"]._read_group(
