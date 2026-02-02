@@ -51,56 +51,73 @@ class StockWarehouseOrderpoint(models.Model):
         string="Demand History Days",
         related="company_id.safety_stock_history_days",
     )
-    # demand_history_exclude_weekends = fields.Boolean(
-    #     string="Exclude Weekends from Demand History",
-    #     related="company_id.safety_stock_history_exclude_weekends",
-    #     store=True,  # Used in SQL query
-    # )
     demand_avg_qty = fields.Float(
         string="Average Daily Demand",
-        # TODO: help
+        compute="_compute_demand_history_stats",
         digits="Product Unit of Measure",
+        help="The average daily outgoing quantity on this warehouse.",
     )
     demand_std_dev = fields.Float(
         string="Standard Deviation of Daily Demand",
-        # TODO: help
+        compute="_compute_demand_history_stats",
         digits="Product Unit of Measure",
+        help="The standard deviation of the daily outgoing quantity on this warehouse.",
     )
     demand_lt_std_dev = fields.Float(
         string="Standard Deviation of Daily Demand over Lead Time",
-        # TODO: help
         compute="_compute_demand_lt_std_dev",
         digits="Product Unit of Measure",
+        help=(
+            "The standard deviation of the daily outgoing quantity on this warehouse "
+            "over the lead time."
+        ),
     )
     safety_stock = fields.Float(
         compute="_compute_safety_stock",
         digits="Product Unit of Measure",
-        # TODO: help
+        help=(
+            "The safety stock is the amount of stock to keep on this warehouse to "
+            "cover the demand during the lead time.\n"
+            "It is computed as the product of the standard deviation of the daily "
+            "outgoing quantity over the lead time, the z-score (statistical factor "
+            "derived from the cycle service level) and the growth factor.\n\n"
+            "safety_stock = demand_lt_std_dev * z_score * (1.0 + growth_factor)"
+        ),
     )
 
     def _get_product_demand_history_domains(
         self, warehouse: StockWarehouse, products: ProductProduct, days: int
     ) -> tuple[Domain, Domain]:
         """Returns the incoming and outgoing moves domains"""
+        # We take into account all "confirmed" move states, cause they represent the
+        # actual demand even if it's not fully done.
+        moves_states = ["assigned", "confirmed", "partially_available", "done"]
         moves_domain = Domain(
             [
                 ("product_id", "in", products.ids),
                 ("date", ">=", f"today -{days}d"),
                 ("date", "<", "today"),
-                ("state", "=", "done"),
+                ("state", "in", moves_states),
                 ("product_qty", ">", 0),
             ]
         )
+        # Domains for outgoing and incoming warehouse moves, except inventory
+        # adjustments that do not represent any demand.
+        wh_location = warehouse.lot_stock_id
         moves_out_domain = Domain(
             [
-                ("location_id", "child_of", warehouse.view_location_id.id),
-                ("location_dest_id.usage", "=", "customer"),
+                ("location_id", "child_of", wh_location.id),
+                ("location_dest_id.usage", "!=", "inventory"),
+                "!",
+                ("location_dest_id", "child_of", wh_location.id),
             ]
         )
         moves_in_domain = Domain(
             [
-                ("location_id.usage", "=", "customer"),
-                ("location_dest_id", "child_of", warehouse.view_location_id.id),
+                ("location_dest_id", "child_of", wh_location.id),
+                ("location_id.usage", "!=", "inventory"),
+                "!",
+                ("location_id", "child_of", wh_location.id),
             ]
         )
         return (moves_domain + moves_in_domain), (moves_domain + moves_out_domain)
@@ -159,8 +176,15 @@ class StockWarehouseOrderpoint(models.Model):
             "demand_std_dev": stdev(filled_serie),
         }
 
-    def _recompute_daily_demand(self):
-        """Recompute the Average Daily Demand and its Standard Deviation."""
+    @api.depends(
+        "safety_stock_method",
+        "demand_history_days",
+        "warehouse_id",
+        "product_id",
+        "product_id.stock_move_ids",
+    )
+    def _compute_demand_history_stats(self):
+        """Compute the Average Daily Demand and its Standard Deviation."""
         # Clear existing values
         self.demand_avg_qty = 0.0
         self.demand_std_dev = 0.0
@@ -193,22 +217,7 @@ class StockWarehouseOrderpoint(models.Model):
                 if orderpoint.product_id in product_consumption_stats:
                     stats = product_consumption_stats[orderpoint.product_id]
                     vals = {k: v for k, v in stats.items() if not k.startswith("_")}
-                    orderpoint.write(vals)
-
-    def _apply_safety_stock(self):
-        for rec in self.filtered(lambda rec: rec.safety_stock_method != "manual"):
-            rec.product_min_qty = rec.safety_stock
-            rec.product_max_qty = rec.product_min_qty + (
-                rec.demand_avg_qty * rec.lead_days
-            )
-
-    def action_recompute_history_demand(self):
-        to_recompute = self.filtered(lambda rec: rec.safety_stock_method != "manual")
-        if not to_recompute:
-            return
-        to_recompute._recompute_daily_demand()
-        to_recompute._apply_safety_stock()
-        return True
+                    orderpoint.update(vals)
 
     @api.depends("demand_std_dev", "lead_days")
     def _compute_demand_lt_std_dev(self):
@@ -224,3 +233,16 @@ class StockWarehouseOrderpoint(models.Model):
             rec.safety_stock = rec.product_id.uom_id.round(
                 rec.demand_lt_std_dev * rec.z_score * (1.0 + rec.growth_factor)
             )
+
+    def _apply_safety_stock(self):
+        """Apply the safety stock to the orderpoint min and max quantities"""
+        for rec in self.filtered(lambda rec: rec.safety_stock_method != "manual"):
+            rec.product_min_qty = rec.safety_stock
+            rec.product_max_qty = rec.product_min_qty + (
+                rec.demand_avg_qty * rec.lead_days
+            )
+
+    def action_apply_safety_stock(self):
+        """Apply the safety stock to the orderpoint min and max quantities"""
+        self._apply_safety_stock()
+        return True

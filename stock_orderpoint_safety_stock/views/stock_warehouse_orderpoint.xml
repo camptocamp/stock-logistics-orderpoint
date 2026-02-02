@@ -26,11 +26,13 @@
                     name="demand_avg_qty"
                     groups="base.group_no_one"
                     optional="hide"
+                    options="{'lazy': true}"
                 />
                 <field
                     name="demand_std_dev"
                     groups="base.group_no_one"
                     optional="hide"
+                    options="{'lazy': true}"
                 />
             </field>
             <field name="product_min_qty" position="attributes">
@@ -50,8 +52,9 @@
             <list position="inside">
                 <button
                     type="object"
-                    name="action_recompute_history_demand"
-                    string="Recompute History Demand"
+                    name="action_apply_safety_stock"
+                    invisible="safety_stock_method == 'manual'"
+                    string="Apply Safety Stock"
                 />
             </list>
         </field>

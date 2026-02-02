@@ -13,6 +13,34 @@ from .common import TestStockOrderpointSafetyStockCommon
 
 
 class TestStockOrderpointSafetyStock(TestStockOrderpointSafetyStockCommon):
+    def test_history_series(self):
+        """Test that the history series is aggregated correctly"""
+        today = fields.Date.today()
+        self._create_moves_from_serie(
+            self.product,
+            [
+                (today - timedelta(days=6), 10),
+                (today - timedelta(days=6), 5),
+                (today - timedelta(days=4), 12),
+                (today, 10),  # Will be ignored, as today's not finished
+            ],
+        )
+        # Check the history series
+        series = self.orderpoint._get_product_demand_history_series(
+            self.orderpoint.warehouse_id,
+            self.orderpoint.product_id,
+            self.orderpoint.demand_history_days,
+        )
+        self.assertEqual(
+            series,
+            {
+                self.product: {
+                    today - timedelta(days=6): 10 + 5,
+                    today - timedelta(days=4): 12,
+                }
+            },
+        )
+
     def test_math_simple(self):
         """Test the math on a small and understandable example
 
@@ -29,12 +57,13 @@ class TestStockOrderpointSafetyStock(TestStockOrderpointSafetyStockCommon):
                 (today - timedelta(days=6), 10),
                 (today - timedelta(days=6), 5),
                 (today - timedelta(days=4), 12),
+                (today, 10),  # Will be ignored, as today's not finished
             ],
         )
         self.env.company.safety_stock_history_days = 7
         self.orderpoint.rule_ids.delay = 1
         self.orderpoint.invalidate_recordset(["lead_days"])
-        self.orderpoint.action_recompute_history_demand()
+        self.orderpoint.action_apply_safety_stock()
         # Precompute results
         avg_qty = round((10 + 5 + 12) / 7, 2)
         std_dev = round(stdev([15, 12, 0, 0, 0, 0, 0]), 2)
@@ -64,7 +93,7 @@ class TestStockOrderpointSafetyStock(TestStockOrderpointSafetyStockCommon):
         self.env.company.safety_stock_history_days = 69
         self.orderpoint.rule_ids.delay = 7
         self.orderpoint.invalidate_recordset(["lead_days"])
-        self.orderpoint.action_recompute_history_demand()
+        self.orderpoint.action_apply_safety_stock()
         self.assertRecordValues(
             self.orderpoint,
             [
