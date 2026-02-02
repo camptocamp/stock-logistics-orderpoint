@@ -10,6 +10,7 @@ from typing import Any
 
 from odoo import api, fields, models
 from odoo.fields import Domain
+from odoo.tools.constants import PREFETCH_MAX
 
 from odoo.addons.product.models.product_product import ProductProduct
 from odoo.addons.stock.models.stock_warehouse import StockWarehouse
@@ -246,3 +247,25 @@ class StockWarehouseOrderpoint(models.Model):
         """Apply the safety stock to the orderpoint min and max quantities"""
         self._apply_safety_stock()
         return True
+
+    @api.onchange("safety_stock_method", "cycle_service_level_id")
+    def _onchange_safety_stock_method_apply(self):
+        """Onchange: safety stock method or cycle service level
+
+        Immediately apply the safety stock to the orderpoint min and max quantities.
+        """
+        self._apply_safety_stock()
+
+    @api.model
+    def _cron_recompute_safety_stock(self, batch_size=PREFETCH_MAX):
+        """Scheduled action: Recompute the safety stock for all orderpoints"""
+        domain = [
+            ("safety_stock_method", "!=", "manual"),
+            ("write_date", "<", "today"),
+        ]
+        orderpoints = self.search(domain, order="id", limit=batch_size)
+        orderpoints._apply_safety_stock()
+        self.env["ir.cron"]._commit_progress(
+            len(orderpoints),
+            remaining=self.search_count(domain),
+        )

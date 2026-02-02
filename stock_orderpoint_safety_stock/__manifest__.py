@@ -16,6 +16,7 @@
     },
     "data": [
         "security/ir.model.access.csv",
+        "data/ir_cron.xml",
         "data/stock_cycle_service_level.xml",
         "views/stock_cycle_service_level.xml",
         "views/stock_warehouse_orderpoint.xml",
