@@ -23,6 +23,12 @@
                     invisible="safety_stock_method != 'csl'"
                 />
                 <field
+                    name="growth_factor"
+                    optional="hide"
+                    invisible="safety_stock_method != 'csl'"
+                    widget="percentage"
+                />
+                <field
                     name="demand_avg_qty"
                     groups="base.group_no_one"
                     optional="hide"
