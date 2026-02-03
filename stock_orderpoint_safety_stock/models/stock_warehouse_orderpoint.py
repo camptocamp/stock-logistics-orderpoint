@@ -37,7 +37,9 @@ class StockWarehouseOrderpoint(models.Model):
         string="Cycle Service Level",
         ondelete="restrict",
     )
-    csl = fields.Float(related="cycle_service_level_id.csl")
+    csl = fields.Float(
+        string="Cycle Service Level Target", related="cycle_service_level_id.csl"
+    )
     z_score = fields.Float(related="cycle_service_level_id.z_score")
     growth_factor = fields.Float(
         digits=(2, 2),

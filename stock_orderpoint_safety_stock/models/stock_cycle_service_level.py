@@ -26,6 +26,7 @@ def norm_ppf(p: float) -> float:
 class StockCycleServiceLevel(models.Model):
     _name = "stock.cycle.service.level"
     _description = "Cycle Service Level"
+    _rec_name = "display_name"
     _order = "csl desc"
 
     csl = fields.Float(

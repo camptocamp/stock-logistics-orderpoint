@@ -84,6 +84,18 @@ class TestStockOrderpointSafetyStock(TestStockOrderpointSafetyStockCommon):
             ],
         )
 
+    # test with growth factor
+
+    # test with assigned, partially assigned and confirmed moves
+
+    # test with inventory adjustments
+
+    # test with inter-warehouse moves
+
+    # test product moves with different uoms
+
+    # test cron
+
     @freeze_time("2026-01-14")
     def test_fixture_serie_01(self):
         serie = self._load_serie_from_csv(
