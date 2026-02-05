@@ -32,6 +32,7 @@ class StockCycleServiceLevel(models.Model):
 
     csl = fields.Float(
         string="Cycle Service Level",
+        digits=(2, 2),
         help=(
             "The probability that demand during the replenishment lead time is fully "
             "covered without a stockout.\n"

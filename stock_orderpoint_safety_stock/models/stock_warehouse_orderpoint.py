@@ -98,10 +98,6 @@ class StockWarehouseOrderpoint(models.Model):
         # Clear existing values
         self.demand_avg_qty = 0.0
         self.demand_std_dev = 0.0
-        # Process only orderpoints not using an automatic safety stock method
-        self = self.filtered(lambda rec: rec.safety_stock_method != "manual")
-        if not self:
-            return
         # Group by warehouse and demand history days to batch read groups of stock moves
         grouped = self.grouped(lambda rec: (rec.warehouse_id, rec.demand_history_days))
         for (warehouse, days), orderpoints in grouped.items():
@@ -123,21 +119,37 @@ class StockWarehouseOrderpoint(models.Model):
 
     @api.depends("safety_stock_method", "demand_lt_std_dev", "z_score", "growth_factor")
     def _compute_safety_stock(self):
-        self.safety_stock = 0.0
-        for rec in self.filtered(lambda rec: rec.safety_stock_method == "csl"):
+        for rec in self:
             rec.safety_stock = rec.product_id.uom_id.round(
                 rec.demand_lt_std_dev * rec.z_score * (1.0 + rec.growth_factor)
             )
+
+    def _get_min_max_quantities_from_safety_stock(self) -> tuple[float, float]:
+        """Get the min and max quantities to apply derived from the safety stock
+
+        The min quantity is the safety stock plus the average daily demand multiplied by
+        the lead time.
+
+        The max quantity is the min quantity plus the average daily demand multiplied by
+        the days to order. Creating a sort of buffer of aproximately "days to order"
+        days until the next order is created.
+
+        :return: The min and max quantities to apply derived from the safety stock
+        :rtype: tuple[float, float]
+        """
+        self.ensure_one()
+        min_qty = self.safety_stock + (self.demand_avg_qty * self.lead_days)
+        max_qty = min_qty + (self.demand_avg_qty * self.days_to_order)
+        return min_qty, max_qty
 
     def _apply_safety_stock(self):
         """Apply the safety stock to the orderpoint min and max quantities"""
         to_apply = self.filtered(lambda rec: rec.safety_stock_method != "manual")
         to_apply.safety_stock_update_date = fields.Datetime.now()
         for rec in to_apply:
-            rec.product_min_qty = rec.safety_stock
-            rec.product_max_qty = rec.product_min_qty + (
-                rec.demand_avg_qty * rec.lead_days
-            )
+            min_qty, max_qty = rec._get_min_max_quantities_from_safety_stock()
+            rec.product_min_qty = min_qty
+            rec.product_max_qty = max_qty
 
     def action_apply_safety_stock(self):
         """Apply the safety stock to the orderpoint min and max quantities"""

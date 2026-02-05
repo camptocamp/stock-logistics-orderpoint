@@ -5,6 +5,7 @@ import datetime
 import math
 from collections.abc import Sequence
 from statistics import fmean, stdev
+from unittest.mock import patch
 
 from odoo import fields
 from odoo.tests import TransactionCase
@@ -45,6 +46,24 @@ class OrderpointSafetyStockCommon(TransactionCase):
                 "safety_stock_method": "csl",
                 "cycle_service_level_id": cls.csl_95.id,
             }
+        )
+
+    @classmethod
+    def _mock_days_to_order(cls, days_to_order: int):
+        """Mock the days_to_order field
+
+        Useful mock to test different values of days_to_order.
+        This field is set by modules depending on stock, like purchase_stock or mrp.
+        These modules are not in the scope of this module, so we mock its value.
+        """
+
+        def _compute_days_to_order(self):
+            self.days_to_order = days_to_order
+
+        return patch.object(
+            cls.env.registry["stock.warehouse.orderpoint"],
+            "_compute_days_to_order",
+            _compute_days_to_order,
         )
 
     @classmethod
@@ -97,18 +116,22 @@ class OrderpointSafetyStockCommon(TransactionCase):
         z_score: float = 1.6449,
         growth: float = 0.0,
         lead_days: int = 1,
+        days_to_order: int = 0,
     ) -> dict[str, float]:
         """Compute the expected values for the provided serie, using a simple math"""
         avg_qty = round(fmean(serie), 2)
         std_dev = round(stdev(serie), 2)
-        safety_stock = round(std_dev * z_score * (1 + growth), 2)
+        std_dev_lt = std_dev * math.sqrt(lead_days)
+        safety_stock = round(std_dev_lt * z_score * (1 + growth), 2)
+        min_qty = safety_stock + (avg_qty * lead_days)
+        max_qty = safety_stock + (avg_qty * (lead_days + days_to_order))
         return {
             "demand_avg_qty": avg_qty,
             "demand_std_dev": std_dev,
-            "demand_lt_std_dev": std_dev * math.sqrt(lead_days),
+            "demand_lt_std_dev": std_dev_lt,
             "safety_stock": safety_stock,
-            "product_min_qty": safety_stock,
-            "product_max_qty": safety_stock + (avg_qty * lead_days),
+            "product_min_qty": min_qty,
+            "product_max_qty": max_qty,
         }
 
     @classmethod

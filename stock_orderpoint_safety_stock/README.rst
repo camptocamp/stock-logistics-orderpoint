@@ -87,18 +87,19 @@ Where:
 
 **How min and max are derived:**
 
-- **Minimum (min):** ``safety stock``
+- **Minimum (min):**
+  ``safety stock + (average daily demand × lead time in days)``
 - **Maximum (max):**
-  ``min + (average daily demand × lead time in days)``
+  ``min + (average daily demand × days to order in days)``
 
 **Why does it work?**
 
-- Odoo triggers replenishment whenever stock falls below the min (safety
-  stock).
+- Odoo triggers replenishment whenever stock falls below the min, which
+  should be enough to cover variance (safety stock) and lead time
+  demand.
 - The max level is set high enough to cover all expected demand until
-  the next restock.
-- Thus, your min acts as a buffer, reducing the risk of running out, and
-  max ensures you don’t overorder.
+  the next restock, plus a buffer to cover the days until the next
+  order.
 
 This makes inventory management both more data-driven and easier to
 maintain.
