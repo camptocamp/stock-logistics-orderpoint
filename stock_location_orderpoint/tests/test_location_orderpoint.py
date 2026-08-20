@@ -246,6 +246,57 @@ class TestLocationOrderpoint(TestLocationOrderpointCommon):
                 job.channel, "root.stock_location_orderpoint_auto_replenishment"
             )
 
+    def test_auto_replenishment_on_source_location_change(self):
+        """The orderpoint of the new source location of a pending move is run
+
+        Reproduces what modules such as stock_move_source_relocate do: they
+        rewrite move.location_id after _action_assign already ran, so the
+        replenishment was only evaluated on the former location.
+        """
+        job_func = self.env["stock.location.orderpoint"].run_auto_replenishment
+        orderpoint, _ = self._create_orderpoint_complete("Stock2", trigger="auto")
+        unrelated_location = self._create_location("Unrelated Stock")
+
+        with trap_jobs() as trap:
+            move = self._create_outgoing_move(12, location=unrelated_location)
+            trap.assert_jobs_count(0, only=job_func)
+
+        with trap_jobs() as trap:
+            move.write({"location_id": self.location_dest.id})
+            trap.assert_jobs_count(1, only=job_func)
+            trap.assert_enqueued_job(
+                orderpoint.browse().run_auto_replenishment,
+                args=(move.product_id, self.location_dest, "location_id"),
+                kwargs={},
+                properties=dict(
+                    identity_key=identity_exact,
+                ),
+            )
+
+    def test_auto_replenishment_on_destination_location_change(self):
+        """The orderpoint of the new destination location of a done move is run"""
+        job_func = self.env["stock.location.orderpoint"].run_auto_replenishment
+        orderpoint, location_src = self._create_orderpoint_complete(
+            "Stock2", trigger="auto"
+        )
+        unrelated_location = self._create_location("Unrelated Stock")
+
+        with trap_jobs() as trap:
+            move = self._create_incoming_move(12, unrelated_location)
+            trap.assert_jobs_count(0, only=job_func)
+
+        with trap_jobs() as trap:
+            move.write({"location_dest_id": location_src.id})
+            trap.assert_jobs_count(1, only=job_func)
+            trap.assert_enqueued_job(
+                orderpoint.browse().run_auto_replenishment,
+                args=(move.product_id, location_src, "location_src_id"),
+                kwargs={},
+                properties=dict(
+                    identity_key=identity_exact,
+                ),
+            )
+
     def test_auto_no_replenishment(self):
         """
         Create a stock move that should not create a replenishment:

@@ -87,6 +87,23 @@ class StockMove(models.Model):
         )
         return job
 
+    def write(self, vals):
+        res = super().write(vals)
+        # `_action_assign` and `_action_done` evaluate the replenishment on the
+        # locations the move had at that time. Modules rewriting those
+        # locations afterwards (stock_move_source_relocate,
+        # stock_dynamic_routing, ...) would otherwise leave the orderpoints of
+        # the new locations untriggered.
+        if "location_id" in vals:
+            self.filtered(
+                lambda move: move.state not in ("draft", "done", "cancel")
+            )._prepare_auto_replenishment_for_outgoing_moves()
+        if "location_dest_id" in vals:
+            self.filtered(
+                lambda move: move.state == "done"
+            )._prepare_auto_replenishment_for_incoming_moves()
+        return res
+
     def _action_assign(self, *args, **kwargs):
         """This triggers the replenishment for new moves which are waiting for stock"""
         res = super()._action_assign(*args, **kwargs)
