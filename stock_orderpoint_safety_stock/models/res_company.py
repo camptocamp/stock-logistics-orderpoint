@@ -11,3 +11,15 @@ class ResCompany(models.Model):
         default=365,
         help="The number of days in the past to use to compute the safety stock.",
     )
+    demand_serie_skip_leading_0s = fields.Boolean(
+        help=(
+            "If checked, all orderpoints linked to one of this company's warehouses"
+            " will compute the 'Average Daily Demand' and 'Standard Deviation"
+            " of Daily Demand' fields values starting from the day of the product's"
+            " earliest moved quantity within the selected timerange; else, they will be"
+            " computed from the beginning of the timerange."
+        ),
+    )
+
+    def _skip_serie_leading_0s(self) -> bool:
+        return self.demand_serie_skip_leading_0s
