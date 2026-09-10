@@ -91,39 +91,34 @@ class ProductProduct(models.Model):
 
     @api.model
     def _get_daily_demand_serie(
-        self, warehouse: StockWarehouse, days: int
+        self, warehouse: StockWarehouse, days: int, **kwargs
     ) -> dict[Self, list[float]]:
         """Returns the daily demand serie for a given warehouse
 
         The serie is a zero-filled list of demand values, each corresponding to a day.
         The values are in the product's base unit of measure.
         """
-        skip_serie_leading_0s = warehouse._skip_serie_leading_0s()
         return {
-            prod: prod._get_daily_demand_serie_single_product(
-                demands=demands,
-                skip_serie_leading_0s=skip_serie_leading_0s,
-                days=days,
-            )
+            prod: prod._zero_fill_demand_serie(demands=demands, days=days, **kwargs)
             for prod, demands in self._get_daily_demand(warehouse, days).items()
         }
 
-    def _get_daily_demand_serie_single_product(
+    def _zero_fill_demand_serie(
         self,
         *,  # keyword-only arguments
         demands: dict[datetime.date, float | int],
-        skip_serie_leading_0s: bool,
         days: int,
+        skip_leading_0s: bool = False,
         **kwargs,
     ) -> list[float]:
         """Returns the serie corresponding to the given params
 
         :param demands: The daily demands for the product. Represents the qty demanded
             each day.
-        :param skip_serie_leading_0s: Whether leading 0s should be skipped in the
+        :param skip_leading_0s: Whether leading 0s should be skipped in the
             resulting serie.
         :param days: The number of days in the serie, up to today. If param
-            ``skip_serie_leading_0s`` is True, this is overridden to be the number of
+            ``skip_leading_0s`` is True, this is overridden to be the number of
             days between the first non-null qty date and today.
         :param kwargs: Additional kwargs to pass to customize this method behavior in
             subclasses. Currently supported kwargs:
@@ -146,7 +141,7 @@ class ProductProduct(models.Model):
         today: datetime.date = kwargs.get("today") or datetime.date.today()
         # 1st case => compose the serie from ``start`` and go on for ``days`` number of
         # days, even if the resulting serie is made only of 0s
-        if not skip_serie_leading_0s:
+        if not skip_leading_0s:
             start: datetime.date = kwargs.get("start") or (today - timedelta(days=days))
             return [demands.get(start + timedelta(days=i), 0.0) for i in range(days)]
         # 2nd case => early exit with an empty serie
@@ -161,7 +156,7 @@ class ProductProduct(models.Model):
 
     @api.model
     def _get_daily_demand_aggregated_vals(
-        self, warehouse: StockWarehouse, days: int
+        self, warehouse: StockWarehouse, days: int, **kwargs
     ) -> dict[Self, dict[str, Any]]:
         """Get the aggregated values of the daily demand per product
 
@@ -171,12 +166,11 @@ class ProductProduct(models.Model):
         :param days: The number of days to get the daily demand for.
         :return: A dictionary with the aggregated values of the series.
         """
-        serie_by_product = self._get_daily_demand_serie(warehouse, days)
+        serie_by_product = self._get_daily_demand_serie(warehouse, days, **kwargs)
         return {
             product: {
                 # Returned to ease overrides in subclasses
                 "_serie": serie,
-                "_serie_count": len(serie),
                 # Values will be written directly to the orderpoint, must be field names
                 # 1- ``demand_avg_qty``: average daily demand
                 #    NB: check we have at least 1 value, else error is raised:

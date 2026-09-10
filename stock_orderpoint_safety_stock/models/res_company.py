@@ -20,6 +20,3 @@ class ResCompany(models.Model):
             " computed from the beginning of the timerange."
         ),
     )
-
-    def _skip_serie_leading_0s(self) -> bool:
-        return self.demand_serie_skip_leading_0s
